@@ -3,7 +3,7 @@ import { User, Ride, RideRequest, RequestStatus } from '../types';
 // API base URL - use relative path for both local dev and production
 const API_BASE = '/api';
 
-// Helper function to make API calls
+// Helper function to make API calls with better error handling
 const apiCall = async (endpoint: string, options: RequestInit = {}) => {
   const url = `${API_BASE}${endpoint}`;
   
@@ -23,8 +23,9 @@ const apiCall = async (endpoint: string, options: RequestInit = {}) => {
 
     return await response.json();
   } catch (err: any) {
-    if (err.message === 'Failed to fetch') {
-      throw new Error('Network Error: Unable to connect to the server. Please check your connection.');
+    // Provide more specific error messages
+    if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+      throw new Error('Network Error: Unable to connect to the server. Please check your connection and ensure the API is deployed correctly.');
     }
     throw err;
   }
@@ -33,7 +34,7 @@ const apiCall = async (endpoint: string, options: RequestInit = {}) => {
 // --- User Services ---
 
 export const findUserByEmail = async (email: string): Promise<User | undefined> => {
-  const result = await apiCall('/users?action=findByEmail', {
+  const result = await apiCall('/users/findByEmail', {
     method: 'POST',
     body: JSON.stringify({ email }),
   });
@@ -41,7 +42,7 @@ export const findUserByEmail = async (email: string): Promise<User | undefined> 
 };
 
 export const findUserByERP = async (erp_id: string): Promise<User | undefined> => {
-  const result = await apiCall('/users?action=findByERP', {
+  const result = await apiCall('/users/findByERP', {
     method: 'POST',
     body: JSON.stringify({ erp_id }),
   });
@@ -49,7 +50,7 @@ export const findUserByERP = async (erp_id: string): Promise<User | undefined> =
 };
 
 export const createUser = async (userData: Omit<User, 'id'>): Promise<User> => {
-  const result = await apiCall('/users?action=create', {
+  const result = await apiCall('/users/create', {
     method: 'POST',
     body: JSON.stringify(userData),
   });
@@ -57,7 +58,7 @@ export const createUser = async (userData: Omit<User, 'id'>): Promise<User> => {
 };
 
 export const updateUserPassword = async (userId: string, newPassword: string): Promise<void> => {
-  await apiCall('/users?action=updatePassword', {
+  await apiCall('/users/updatePassword', {
     method: 'POST',
     body: JSON.stringify({ userId, newPassword }),
   });
@@ -66,7 +67,7 @@ export const updateUserPassword = async (userId: string, newPassword: string): P
 // --- Ride Services ---
 
 export const createRide = async (rideData: Omit<Ride, 'id' | 'created_at' | 'available_seats'>): Promise<Ride> => {
-  const result = await apiCall('/rides?action=create', {
+  const result = await apiCall('/rides/create', {
     method: 'POST',
     body: JSON.stringify(rideData),
   });
@@ -74,14 +75,14 @@ export const createRide = async (rideData: Omit<Ride, 'id' | 'created_at' | 'ava
 };
 
 export const getRides = async (): Promise<Ride[]> => {
-  const result = await apiCall('/rides?action=getAll', {
+  const result = await apiCall('/rides/getAll', {
     method: 'GET',
   });
   return result.rides || [];
 };
 
 export const getRidesByHost = async (hostId: string): Promise<Ride[]> => {
-  const result = await apiCall(`/rides?action=getByHost&hostId=${encodeURIComponent(hostId)}`, {
+  const result = await apiCall(`/rides/getByHost?hostId=${encodeURIComponent(hostId)}`, {
     method: 'GET',
   });
   return result.rides || [];
@@ -90,7 +91,7 @@ export const getRidesByHost = async (hostId: string): Promise<Ride[]> => {
 // --- Request Services ---
 
 export const createRideRequest = async (requestData: Omit<RideRequest, 'id' | 'created_at' | 'status'>): Promise<RideRequest> => {
-  const result = await apiCall('/requests?action=create', {
+  const result = await apiCall('/requests/create', {
     method: 'POST',
     body: JSON.stringify(requestData),
   });
@@ -98,21 +99,21 @@ export const createRideRequest = async (requestData: Omit<RideRequest, 'id' | 'c
 };
 
 export const getRequestsForRide = async (rideId: string): Promise<RideRequest[]> => {
-  const result = await apiCall(`/requests?action=getForRide&rideId=${encodeURIComponent(rideId)}`, {
+  const result = await apiCall(`/requests/getForRide?rideId=${encodeURIComponent(rideId)}`, {
     method: 'GET',
   });
   return result.requests || [];
 };
 
 export const getRequestsByPassenger = async (passengerId: string): Promise<{request: RideRequest, ride: Ride}[]> => {
-  const result = await apiCall(`/requests?action=getByPassenger&passengerId=${encodeURIComponent(passengerId)}`, {
+  const result = await apiCall(`/requests/getByPassenger?passengerId=${encodeURIComponent(passengerId)}`, {
     method: 'GET',
   });
   return result.requests || [];
 };
 
 export const updateRequestStatus = async (requestId: string, status: RequestStatus): Promise<void> => {
-  await apiCall('/requests?action=updateStatus', {
+  await apiCall('/requests/updateStatus', {
     method: 'POST',
     body: JSON.stringify({ requestId, status }),
   });
