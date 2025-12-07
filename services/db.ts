@@ -2,9 +2,9 @@ import { User, Ride, RideRequest, RequestStatus } from '../types';
 
 // Connection details derived from your provided string.
 // We are using the standard regional endpoint format for the SQL-over-HTTP API.
-// Original: ep-weathered-union-ahorbtng-pooler.c-3.us-east-1.aws.neon.tech
-// HTTP Endpoint: ep-weathered-union-ahorbtng.us-east-1.aws.neon.tech
-const PROJECT_HOST = "ep-weathered-union-ahorbtng.us-east-1.aws.neon.tech";
+// Connection String: ...@ep-weathered-union-ahorbtng-pooler.c-3.us-east-1.aws.neon.tech/...
+// HTTP Endpoint MUST include the 'c-3' segment.
+const PROJECT_HOST = "ep-weathered-union-ahorbtng.c-3.us-east-1.aws.neon.tech";
 const API_BASE = `https://${PROJECT_HOST}/sql`;
 const API_TOKEN = "npg_Bis4u7lpYvNX";
 const DB_NAME = "neondb";
@@ -26,6 +26,7 @@ const executeSql = async (query: string, params: any[] = [], retries = 2): Promi
     const response = await fetch(url, {
       method: 'POST',
       headers: getHeaders(),
+      mode: 'cors', // Explicitly request CORS
       body: JSON.stringify({ query, params }),
     });
 
