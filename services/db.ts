@@ -7,6 +7,9 @@ const API_BASE = '/api';
 const apiCall = async (endpoint: string, options: RequestInit = {}) => {
   const url = `${API_BASE}${endpoint}`;
   
+  console.log(`[Frontend] Making API call to: ${url}`);
+  console.log(`[Frontend] Method: ${options.method || 'GET'}`);
+  
   try {
     const response = await fetch(url, {
       ...options,
@@ -16,16 +19,34 @@ const apiCall = async (endpoint: string, options: RequestInit = {}) => {
       },
     });
 
+    console.log(`[Frontend] Response status: ${response.status}`);
+    console.log(`[Frontend] Response ok: ${response.ok}`);
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      let errorData;
+      try {
+        const text = await response.text();
+        console.error(`[Frontend] Error response text: ${text}`);
+        errorData = JSON.parse(text);
+      } catch (e) {
+        errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+      }
+      
+      console.error(`[Frontend] Error data:`, errorData);
       throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
     }
 
-    return await response.json();
+    const json = await response.json();
+    console.log(`[Frontend] Success:`, json);
+    return json;
   } catch (err: any) {
+    console.error(`[Frontend] API call failed:`, err);
+    console.error(`[Frontend] Error name:`, err.name);
+    console.error(`[Frontend] Error message:`, err.message);
+    
     // Provide more specific error messages
-    if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
-      throw new Error('Network Error: Unable to connect to the server. Please check your connection and ensure the API is deployed correctly.');
+    if (err.message === 'Failed to fetch' || err.name === 'TypeError' || err.message?.includes('fetch')) {
+      throw new Error(`Network Error: Unable to connect to the API server. The endpoint "${url}" may not be deployed or accessible. Please check your deployment.`);
     }
     throw err;
   }
@@ -34,7 +55,7 @@ const apiCall = async (endpoint: string, options: RequestInit = {}) => {
 // --- User Services ---
 
 export const findUserByEmail = async (email: string): Promise<User | undefined> => {
-  const result = await apiCall('/users/findByEmail', {
+  const result = await apiCall('/users?action=findByEmail', {
     method: 'POST',
     body: JSON.stringify({ email }),
   });
@@ -42,7 +63,7 @@ export const findUserByEmail = async (email: string): Promise<User | undefined> 
 };
 
 export const findUserByERP = async (erp_id: string): Promise<User | undefined> => {
-  const result = await apiCall('/users/findByERP', {
+  const result = await apiCall('/users?action=findByERP', {
     method: 'POST',
     body: JSON.stringify({ erp_id }),
   });
@@ -50,7 +71,7 @@ export const findUserByERP = async (erp_id: string): Promise<User | undefined> =
 };
 
 export const createUser = async (userData: Omit<User, 'id'>): Promise<User> => {
-  const result = await apiCall('/users/create', {
+  const result = await apiCall('/users?action=create', {
     method: 'POST',
     body: JSON.stringify(userData),
   });
@@ -58,7 +79,7 @@ export const createUser = async (userData: Omit<User, 'id'>): Promise<User> => {
 };
 
 export const updateUserPassword = async (userId: string, newPassword: string): Promise<void> => {
-  await apiCall('/users/updatePassword', {
+  await apiCall('/users?action=updatePassword', {
     method: 'POST',
     body: JSON.stringify({ userId, newPassword }),
   });
@@ -67,7 +88,7 @@ export const updateUserPassword = async (userId: string, newPassword: string): P
 // --- Ride Services ---
 
 export const createRide = async (rideData: Omit<Ride, 'id' | 'created_at' | 'available_seats'>): Promise<Ride> => {
-  const result = await apiCall('/rides/create', {
+  const result = await apiCall('/rides?action=create', {
     method: 'POST',
     body: JSON.stringify(rideData),
   });
@@ -75,14 +96,14 @@ export const createRide = async (rideData: Omit<Ride, 'id' | 'created_at' | 'ava
 };
 
 export const getRides = async (): Promise<Ride[]> => {
-  const result = await apiCall('/rides/getAll', {
+  const result = await apiCall('/rides?action=getAll', {
     method: 'GET',
   });
   return result.rides || [];
 };
 
 export const getRidesByHost = async (hostId: string): Promise<Ride[]> => {
-  const result = await apiCall(`/rides/getByHost?hostId=${encodeURIComponent(hostId)}`, {
+  const result = await apiCall(`/rides?action=getByHost&hostId=${encodeURIComponent(hostId)}`, {
     method: 'GET',
   });
   return result.rides || [];
@@ -91,7 +112,7 @@ export const getRidesByHost = async (hostId: string): Promise<Ride[]> => {
 // --- Request Services ---
 
 export const createRideRequest = async (requestData: Omit<RideRequest, 'id' | 'created_at' | 'status'>): Promise<RideRequest> => {
-  const result = await apiCall('/requests/create', {
+  const result = await apiCall('/requests?action=create', {
     method: 'POST',
     body: JSON.stringify(requestData),
   });
@@ -99,21 +120,21 @@ export const createRideRequest = async (requestData: Omit<RideRequest, 'id' | 'c
 };
 
 export const getRequestsForRide = async (rideId: string): Promise<RideRequest[]> => {
-  const result = await apiCall(`/requests/getForRide?rideId=${encodeURIComponent(rideId)}`, {
+  const result = await apiCall(`/requests?action=getForRide&rideId=${encodeURIComponent(rideId)}`, {
     method: 'GET',
   });
   return result.requests || [];
 };
 
 export const getRequestsByPassenger = async (passengerId: string): Promise<{request: RideRequest, ride: Ride}[]> => {
-  const result = await apiCall(`/requests/getByPassenger?passengerId=${encodeURIComponent(passengerId)}`, {
+  const result = await apiCall(`/requests?action=getByPassenger&passengerId=${encodeURIComponent(passengerId)}`, {
     method: 'GET',
   });
   return result.requests || [];
 };
 
 export const updateRequestStatus = async (requestId: string, status: RequestStatus): Promise<void> => {
-  await apiCall('/requests/updateStatus', {
+  await apiCall('/requests?action=updateStatus', {
     method: 'POST',
     body: JSON.stringify({ requestId, status }),
   });
