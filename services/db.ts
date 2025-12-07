@@ -1,174 +1,250 @@
 import { User, Ride, RideRequest, RequestStatus } from '../types';
 
-// Keys for localStorage
-const USERS_KEY = 'carpool_users';
-const RIDES_KEY = 'carpool_rides';
-const REQUESTS_KEY = 'carpool_requests';
+// Connection details derived from your provided string.
+// We are using the standard regional endpoint format for the SQL-over-HTTP API.
+// Original: ep-weathered-union-ahorbtng-pooler.c-3.us-east-1.aws.neon.tech
+// HTTP Endpoint: ep-weathered-union-ahorbtng.us-east-1.aws.neon.tech
+const PROJECT_HOST = "ep-weathered-union-ahorbtng.us-east-1.aws.neon.tech";
+const API_BASE = `https://${PROJECT_HOST}/sql`;
+const API_TOKEN = "npg_Bis4u7lpYvNX";
+const DB_NAME = "neondb";
 
-// Simulate async delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// --- Initialization ---
-const initializeDB = () => {
-  if (!localStorage.getItem(USERS_KEY)) localStorage.setItem(USERS_KEY, JSON.stringify([]));
-  if (!localStorage.getItem(RIDES_KEY)) localStorage.setItem(RIDES_KEY, JSON.stringify([]));
-  if (!localStorage.getItem(REQUESTS_KEY)) localStorage.setItem(REQUESTS_KEY, JSON.stringify([]));
+const getHeaders = () => {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${API_TOKEN}`,
+  };
 };
 
-initializeDB();
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Generic fetch wrapper to execute SQL with retry logic for "wake up" scenarios
+const executeSql = async (query: string, params: any[] = [], retries = 2): Promise<any[]> => {
+  const url = `${API_BASE}?dbname=${DB_NAME}`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ query, params }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      // If 503 or 504, the DB might be waking up or timed out
+      if ((response.status === 503 || response.status === 504) && retries > 0) {
+        console.log(`Database might be sleeping (Status ${response.status}). Retrying in 2s...`);
+        await delay(2000);
+        return executeSql(query, params, retries - 1);
+      }
+      console.error(`DB Error [${response.status}]`, errorText);
+      throw new Error(`Database Error (${response.status}): ${errorText}`);
+    }
+
+    const json = await response.json();
+    // Neon /sql endpoint returns { rows: [...], fields: [...] }
+    return json.rows || [];
+  } catch (err: any) {
+    if (err.message === 'Failed to fetch') {
+      console.error("Network Error: Could not reach the Neon Database.");
+      console.error("Debug Info: ", { url, mode: 'cors' });
+      
+      // If we have retries left, try one more time for network blips
+      if (retries > 0) {
+         await delay(1000);
+         return executeSql(query, params, retries - 1);
+      }
+      
+      throw new Error("Network Error: Unable to connect to the database. It might be blocked by your browser or network settings (CORS).");
+    }
+    console.error("SQL Execution Error:", err);
+    throw err;
+  }
+};
 
 // --- User Services ---
 
 export const findUserByEmail = async (email: string): Promise<User | undefined> => {
-  await delay(300);
-  const users: User[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-  return users.find(u => u.email === email);
+  const rows = await executeSql('SELECT * FROM users WHERE email = $1', [email]);
+  return rows.length > 0 ? rows[0] : undefined;
 };
 
 export const findUserByERP = async (erp_id: string): Promise<User | undefined> => {
-  await delay(300);
-  const users: User[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-  return users.find(u => u.erp_id === erp_id);
+  const rows = await executeSql('SELECT * FROM users WHERE erp_id = $1', [erp_id]);
+  return rows.length > 0 ? rows[0] : undefined;
 };
 
 export const createUser = async (userData: Omit<User, 'id'>): Promise<User> => {
-  await delay(500);
-  const users: User[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-  
-  if (users.find(u => u.erp_id === userData.erp_id)) {
-    throw new Error('ERP ID already exists');
-  }
-  if (users.find(u => u.email === userData.email)) {
-    throw new Error('Email already exists');
-  }
+  // Manual check to give good error messages
+  const existingEmail = await findUserByEmail(userData.email);
+  if (existingEmail) throw new Error('Email already exists');
 
-  const newUser: User = { ...userData, id: Math.random().toString(36).substr(2, 9) };
-  users.push(newUser);
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  return newUser;
+  const existingErp = await findUserByERP(userData.erp_id);
+  if (existingErp) throw new Error('ERP ID already exists');
+
+  // We explicitly list columns to ensure safety
+  const query = `
+    INSERT INTO users (
+      erp_id, email, password, name, gender, graduating_year, 
+      contact_number, role, sec_question_1, sec_answer_1, sec_question_2, sec_answer_2
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    RETURNING *
+  `;
+  
+  const params = [
+    userData.erp_id,
+    userData.email,
+    userData.password,
+    userData.name,
+    userData.gender,
+    userData.graduating_year,
+    userData.contact_number,
+    userData.role,
+    userData.sec_question_1,
+    userData.sec_answer_1,
+    userData.sec_question_2,
+    userData.sec_answer_2
+  ];
+
+  const rows = await executeSql(query, params);
+  return rows[0];
 };
 
 export const updateUserPassword = async (userId: string, newPassword: string): Promise<void> => {
-  await delay(400);
-  const users: User[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-  const index = users.findIndex(u => u.id === userId);
-  if (index !== -1) {
-    users[index].password = newPassword;
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  } else {
-    throw new Error('User not found');
-  }
+  await executeSql('UPDATE users SET password = $1 WHERE id = $2', [newPassword, userId]);
 };
 
 // --- Ride Services ---
 
 export const createRide = async (rideData: Omit<Ride, 'id' | 'created_at' | 'available_seats'>): Promise<Ride> => {
-  await delay(400);
-  const rides: Ride[] = JSON.parse(localStorage.getItem(RIDES_KEY) || '[]');
-  
-  const newRide: Ride = {
-    ...rideData,
-    id: Math.random().toString(36).substr(2, 9),
-    available_seats: rideData.total_seats,
-    created_at: new Date().toISOString(),
-  };
-  
-  rides.push(newRide);
-  localStorage.setItem(RIDES_KEY, JSON.stringify(rides));
-  return newRide;
+  const query = `
+    INSERT INTO rides (
+      host_id, host_name, departure_location, destination_location, 
+      departure_time, fare, total_seats, available_seats
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    RETURNING *
+  `;
+
+  const params = [
+    rideData.host_id,
+    rideData.host_name,
+    rideData.departure_location,
+    rideData.destination_location,
+    rideData.departure_time,
+    rideData.fare,
+    rideData.total_seats,
+    rideData.total_seats // available_seats starts equal to total
+  ];
+
+  const rows = await executeSql(query, params);
+  return rows[0];
 };
 
 export const getRides = async (): Promise<Ride[]> => {
-  await delay(300);
-  const rides: Ride[] = JSON.parse(localStorage.getItem(RIDES_KEY) || '[]');
-  // Sort by departure time (nearest first)
-  return rides.sort((a, b) => new Date(a.departure_time).getTime() - new Date(b.departure_time).getTime());
+  // Fetch rides and ensure dates are strings (Neon returns them as strings usually, but good to be safe)
+  return executeSql('SELECT * FROM rides ORDER BY departure_time ASC');
 };
 
 export const getRidesByHost = async (hostId: string): Promise<Ride[]> => {
-  await delay(300);
-  const rides: Ride[] = JSON.parse(localStorage.getItem(RIDES_KEY) || '[]');
-  return rides.filter(r => r.host_id === hostId);
+  return executeSql('SELECT * FROM rides WHERE host_id = $1 ORDER BY departure_time DESC', [hostId]);
 };
 
 // --- Request Services ---
 
 export const createRideRequest = async (requestData: Omit<RideRequest, 'id' | 'created_at' | 'status'>): Promise<RideRequest> => {
-  await delay(400);
-  const requests: RideRequest[] = JSON.parse(localStorage.getItem(REQUESTS_KEY) || '[]');
-  
-  // Check for existing pending request
-  const existing = requests.find(r => 
-    r.ride_id === requestData.ride_id && 
-    r.passenger_id === requestData.passenger_id &&
-    (r.status === 'pending' || r.status === 'accepted')
+  // Check existing
+  const existing = await executeSql(
+    "SELECT * FROM ride_requests WHERE ride_id = $1 AND passenger_id = $2 AND status IN ('pending', 'accepted')",
+    [requestData.ride_id, requestData.passenger_id]
   );
 
-  if (existing) {
+  if (existing.length > 0) {
     throw new Error('You already have a pending or accepted request for this ride.');
   }
 
-  const newRequest: RideRequest = {
-    ...requestData,
-    id: Math.random().toString(36).substr(2, 9),
-    status: 'pending',
-    created_at: new Date().toISOString(),
-  };
+  const query = `
+    INSERT INTO ride_requests (
+      ride_id, passenger_id, passenger_name, offered_price, comment, status
+    ) VALUES ($1, $2, $3, $4, $5, 'pending')
+    RETURNING *
+  `;
 
-  requests.push(newRequest);
-  localStorage.setItem(REQUESTS_KEY, JSON.stringify(requests));
-  return newRequest;
+  const params = [
+    requestData.ride_id,
+    requestData.passenger_id,
+    requestData.passenger_name,
+    requestData.offered_price,
+    requestData.comment
+  ];
+
+  const rows = await executeSql(query, params);
+  return rows[0];
 };
 
 export const getRequestsForRide = async (rideId: string): Promise<RideRequest[]> => {
-  await delay(200);
-  const requests: RideRequest[] = JSON.parse(localStorage.getItem(REQUESTS_KEY) || '[]');
-  return requests.filter(r => r.ride_id === rideId);
+  return executeSql('SELECT * FROM ride_requests WHERE ride_id = $1', [rideId]);
 };
 
 export const getRequestsByPassenger = async (passengerId: string): Promise<{request: RideRequest, ride: Ride}[]> => {
-  await delay(300);
-  const requests: RideRequest[] = JSON.parse(localStorage.getItem(REQUESTS_KEY) || '[]');
-  const rides: Ride[] = JSON.parse(localStorage.getItem(RIDES_KEY) || '[]');
-  
-  const myRequests = requests.filter(r => r.passenger_id === passengerId);
-  
-  // Join with Ride data
-  return myRequests.map(req => {
-    const ride = rides.find(r => r.id === req.ride_id);
-    if (!ride) throw new Error('Ride data missing');
-    return { request: req, ride };
-  });
+  // Join query to get ride details
+  const query = `
+    SELECT 
+      rr.id as rr_id, rr.ride_id, rr.passenger_id, rr.passenger_name, rr.offered_price, rr.comment, rr.status, rr.created_at as rr_created_at,
+      r.id as r_id, r.host_id, r.host_name, r.departure_location, r.destination_location, r.departure_time, r.fare, r.total_seats, r.available_seats, r.created_at as r_created_at
+    FROM ride_requests rr
+    JOIN rides r ON rr.ride_id = r.id
+    WHERE rr.passenger_id = $1
+    ORDER BY rr.created_at DESC
+  `;
+
+  const rows = await executeSql(query, [passengerId]);
+
+  // Transform flat rows back to nested object structure
+  return rows.map((row: any) => ({
+    request: {
+      id: row.rr_id,
+      ride_id: row.ride_id,
+      passenger_id: row.passenger_id,
+      passenger_name: row.passenger_name,
+      offered_price: row.offered_price,
+      comment: row.comment,
+      status: row.status,
+      created_at: row.rr_created_at
+    },
+    ride: {
+      id: row.r_id,
+      host_id: row.host_id,
+      host_name: row.host_name,
+      departure_location: row.departure_location,
+      destination_location: row.destination_location,
+      departure_time: row.departure_time,
+      fare: row.fare,
+      total_seats: row.total_seats,
+      available_seats: row.available_seats,
+      created_at: row.r_created_at
+    }
+  }));
 };
 
-// Fixed: imported RequestStatus from types to resolve undefined type error
 export const updateRequestStatus = async (requestId: string, status: RequestStatus): Promise<void> => {
-  await delay(300);
-  const requests: RideRequest[] = JSON.parse(localStorage.getItem(REQUESTS_KEY) || '[]');
-  const rides: Ride[] = JSON.parse(localStorage.getItem(RIDES_KEY) || '[]');
-  
-  const reqIndex = requests.findIndex(r => r.id === requestId);
-  if (reqIndex === -1) throw new Error('Request not found');
-
-  const request = requests[reqIndex];
-  const rideIndex = rides.findIndex(r => r.id === request.ride_id);
-  
-  if (rideIndex === -1) throw new Error('Ride associated with request not found');
-  const ride = rides[rideIndex];
+  // We need to do this in a transaction ideally, but for now strict sequential awaits
+  const reqRows = await executeSql('SELECT * FROM ride_requests WHERE id = $1', [requestId]);
+  if (reqRows.length === 0) throw new Error('Request not found');
+  const request = reqRows[0];
 
   if (status === 'accepted') {
+    const rideRows = await executeSql('SELECT * FROM rides WHERE id = $1', [request.ride_id]);
+    if (rideRows.length === 0) throw new Error('Ride not found');
+    const ride = rideRows[0];
+
     if (ride.available_seats <= 0) {
       throw new Error('No seats available');
     }
-    ride.available_seats -= 1;
+
+    // Update ride seats
+    await executeSql('UPDATE rides SET available_seats = available_seats - 1 WHERE id = $1', [request.ride_id]);
   }
 
-  request.status = status;
-  
-  // Update DB
-  requests[reqIndex] = request;
-  rides[rideIndex] = ride;
-  
-  localStorage.setItem(REQUESTS_KEY, JSON.stringify(requests));
-  localStorage.setItem(RIDES_KEY, JSON.stringify(rides));
+  // Update request status
+  await executeSql('UPDATE ride_requests SET status = $1 WHERE id = $2', [status, requestId]);
 };

@@ -21,13 +21,20 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, onNavigate }) => {
     setLoading(true);
     try {
       const user = await DB.findUserByEmail(email);
+      // Note: In a real app, never check passwords on the client side like this.
+      // This is purely for the prototype using the REST API for data retrieval.
       if (user && user.password === password) {
         onLoginSuccess(user);
       } else {
-        setError('Incorrect email or password.');
+        if (!user) {
+             setError('User not found. Please sign up.');
+        } else {
+             setError('Incorrect password.');
+        }
       }
-    } catch (err) {
-      setError('An unexpected error occurred.');
+    } catch (err: any) {
+      console.error("Login Error:", err);
+      setError(err.message || 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -149,6 +156,7 @@ export const Signup: React.FC<LoginProps> = ({ onLoginSuccess, onNavigate }) => 
       });
       onLoginSuccess(user);
     } catch (err: any) {
+      console.error("Signup Error:", err);
       setError(err.message || "Signup failed");
     } finally {
       setLoading(false);
@@ -260,8 +268,10 @@ export const ForgotPassword: React.FC<{ onNavigate: (page: PageView) => void }> 
       } else {
         setError('No user found with this ERP ID.');
       }
-    } catch (e) { setError('Error occurred.'); }
-    finally { setLoading(false); }
+    } catch (e: any) { 
+        console.error(e);
+        setError(e.message || 'Error occurred during search.'); 
+    } finally { setLoading(false); }
   };
 
   // Step 2: Verify Answers
@@ -298,8 +308,10 @@ export const ForgotPassword: React.FC<{ onNavigate: (page: PageView) => void }> 
         setSuccess('Password has been reset successfully.');
         setTimeout(() => onNavigate('login'), 2000);
       }
-    } catch (e) { setError('Failed to reset password.'); }
-    finally { setLoading(false); }
+    } catch (e: any) { 
+        console.error(e);
+        setError(e.message || 'Failed to reset password.'); 
+    } finally { setLoading(false); }
   };
 
   return (
